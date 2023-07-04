@@ -15,13 +15,13 @@
 #           This dictionary is imported through the json format.
 #
 
-import numpy as np
 import xml.sax
 import re
 import os
 import tempfile
-from Musicxml_parser.smooth_dynamic import smooth_dyn
-from Musicxml_parser.totalLengthHandler import TotalLengthHandler
+import numpy as np
+from smooth_dynamic import smooth_dyn
+from totalLengthHandler import TotalLengthHandler
 
 mapping_step_midi = {
     'C': 0,
@@ -32,6 +32,18 @@ mapping_step_midi = {
     'A': 9,
     'B': 11
 }
+
+next_step = {
+    'C': 'D',
+    'D': 'E',
+    'E': 'F',
+    'F': 'G',
+    'G': 'A',
+    'A': 'B',
+    'B': 'C'
+}
+
+keysign_notes = ['F','C','G','D','A','E','B']
 
 mapping_dyn_number = {
     # Value drawn from http://www.wikiwand.com/en/Dynamics_%28music%29
@@ -47,8 +59,9 @@ mapping_dyn_number = {
 
 
 class ScoreToPianorollHandler(xml.sax.ContentHandler):
-    def __init__(self, division, total_length, number_pitches=128, discard_grace=False):
+    def __init__(self, division, total_length, shortest_notes, number_pitches=128, discard_grace=False):
         self.CurrentElement = u""
+        self.CurrentAttributes = {}
         # Instrument
         self.number_pitches = number_pitches
         self.identifier = u""                # Current identifier
@@ -63,6 +76,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         self.beat = -1
         self.beat_type = -1
         self.bar_length = -1
+        self.measure_number = 0
 
         # Current note information
         # Pitch
@@ -84,6 +98,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         self.voice_set = False
         # Deal with grace notes
         self.grace = False
+        self.slash = False
         self.discard_grace = discard_grace
 
         # Pianoroll
@@ -96,11 +111,17 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         self.articulation_local = np.zeros([self.total_length * self.division_pianoroll, self.number_pitches], dtype=np.int)
         # Tied notes (not phrasing)
         self.tie_type = None
+        self.slur_type = None
         self.tying = {}  # Contains voice -> tie_on?
+        self.sluring = {}
+        self.slur_note = None
+        self.stop_slur = False
         # Staccati . Note that for chords the staccato tag is
         # ALWAYS on the first note of the chord if the file is correctly written
         self.previous_staccato = False
         self.staccato = False
+        self.previous_staccatissimo = False
+        self.staccatissimo = False
 
         # Time evolution of the dynamics
         self.writting_dynamic = False
@@ -110,12 +131,42 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         self.direction_type = None
         self.direction_start = None
         self.direction_stop = None
+        self.cresc = 0
+        self.cresc_start_dyn = None
+        self.cresc_nowedge = False
+        self.wait_for_dyn = False
+        self.wait_for_dyn_time = 0
+        self.dash_time = 0
+        self.dash = False
+        # key signature
+        self.keysign = 0
+        # trill
+        self.trill = False
+        self.trill_new_step = 0
+        self.trill_new_octave = 0
+        self.trill_new_alter = 0
+        self.trill_next_step = 0
+        self.trill_length = 0
+        self.shortest_notes = shortest_notes
+
+        # tremolo
+        self.tremolo = False
+        self.tremolo_double = False
+        self.tremolo_length = 0
+        self.tremolo_start_pitch = 0
+        self.tremolo_start_time = 0
+        self.tremolo_end = False
+        self.time_mod = False
+        self.actual_notes = 0
+        self.normal_notes = 0
 
         ####################################################################
         ####################################################################
         ####################################################################
+
     def startElement(self, tag, attributes):
         self.CurrentElement = tag
+        self.CurrentAttributes = attributes
 
         # Part information
         if tag == u"score-part":
@@ -131,10 +182,15 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
             # Initialize the articulations
             self.tie_type = None
             self.tying = {}  # Contains {voice -> tie_on} ?
+            self.slur_type = None
+            self.sluring = {}
             self.articulation_local = np.zeros([self.total_length * self.division_pianoroll, self.number_pitches], dtype=np.int)
             # Initialize the dynamics
             self.dynamics = np.zeros([self.total_length * self.division_pianoroll], dtype=np.float) + 0.5  # Don't initialize to zero knowing if no dynamic is given
             self.dyn_flag = {}
+
+        if tag == u'measure':
+            self.measure_number = attributes[u'number']
 
         if tag == u'note':
             self.not_played_note = False
@@ -150,61 +206,182 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
             self.chord = True
         if tag == u'grace':
             self.grace = True
+            self.slash = True if (u'slash' in attributes and attributes[u'slash']=="yes") else False # error
 
+        time_pianoroll = int(self.time * self.division_pianoroll / self.division_score)
         ####################################################################
         if tag == u'tie':
             self.tie_type = attributes[u'type']
 
+        if tag == u'slur':
+            self.slur_type = attributes[u'type']
+
         if tag == u'staccato':
             self.staccato = True
 
+        if tag == u'staccatissimo':
+            self.staccatissimo = True
+        
+        ####################################################################
+        # Trills
+        if tag == u'trill-mark':
+            self.trill = True
+            midi_pitch = mapping_step_midi[self.step] + self.octave * 12 + self.alter
+            self.trill_new_step = next_step[self.step]
+            self.trill_new_octave = self.octave + 1 if self.step=='B' else self.octave
+            self.trill_new_alter = 0
+            if self.keysign >= 0:
+                alter_keys = keysign_notes[:self.keysign]
+                if self.trill_new_step in alter_keys:
+                    self.trill_new_alter = 1
+            else:
+                alter_keys = keysign_notes[self.keysign:]
+                if self.trill_new_step in alter_keys:
+                    self.trill_new_alter = -1
+            self.trill_next_step = mapping_step_midi[self.trill_new_step] + self.trill_new_octave * 12 + self.trill_new_alter
+            keys = np.array(list(self.shortest_notes.keys()))
+            tempo_key = max(sorted(keys[keys<=time_pianoroll]))
+            self.trill_length = self.shortest_notes[tempo_key] * 1/2
+            self.trill_length = int(self.trill_length * self.division_pianoroll / self.division_score)
+
+        if tag == u'time-modification':
+            self.time_mod = True
+
         ####################################################################
         # Dynamics
-        time_pianoroll = int(self.time * self.division_pianoroll / self.division_score)
+        dyn = False
         if tag in mapping_dyn_number:
             self.dynamics[time_pianoroll:] = mapping_dyn_number[tag]
             self.dyn_flag[time_pianoroll] = 'N'
+            dyn = True
         elif tag in (u"sf", u"sfz", u"sffz", u"fz"):
             self.dynamics[time_pianoroll] = mapping_dyn_number[u'fff']
             self.dyn_flag[time_pianoroll] = 'N'
+            dyn = True
         elif tag == u'fp':
             self.dynamics[time_pianoroll] = mapping_dyn_number[u'f']
             self.dynamics[time_pianoroll + 1:] = mapping_dyn_number[u'p']
             self.dyn_flag[time_pianoroll] = 'N'
             self.dyn_flag[time_pianoroll + 1] = 'N'
+            dyn = True
+        elif tag == u'ffp':
+            self.dynamics[time_pianoroll] = mapping_dyn_number[u'ff']
+            self.dynamics[time_pianoroll + 1:] = mapping_dyn_number[u'p']
+            self.dyn_flag[time_pianoroll] = 'N'
+            self.dyn_flag[time_pianoroll + 1] = 'N'
+            dyn = True
+
+        # for crescendo 
+        if self.cresc != 0 and self.wait_for_dyn and dyn:
+            if self.cresc_nowedge:
+                self.direction_stop = time_pianoroll
+                self.cresc_nowedge = False
+
+            starting_dyn = self.cresc_start_dyn 
+            ending_dyn = self.dynamics[time_pianoroll]
+            temp_ending_dyn = ending_dyn.copy()
+            if self.cresc > 0:
+                if ending_dyn <= starting_dyn:
+                    temp_ending_dyn = min(starting_dyn + 0.25, 1)
+                self.dyn_flag[self.direction_start] = 'Cresc_start'
+                self.dyn_flag[self.direction_stop] = 'Cresc_stop'
+            if self.cresc < 0:
+                if ending_dyn >= starting_dyn:
+                    temp_ending_dyn = max(starting_dyn - 0.25, 0)
+                self.dyn_flag[self.direction_start] = 'Dim_start'
+                self.dyn_flag[self.direction_stop] = 'Dim_stop'
+
+            self.dynamics[self.direction_start:self.direction_stop] = \
+                np.linspace(starting_dyn, temp_ending_dyn, self.direction_stop - self.direction_start)
+            # print(starting_dyn, temp_ending_dyn, ending_dyn, self.direction_start, self.direction_stop)
+            # self.dynamics[self.direction_stop:] = ending_dyn
+            self.direction_start = None
+            self.direction_stop = None
+            self.cresc = 0
+            self.wait_for_dyn = False
+
+        elif self.cresc != 0 and self.wait_for_dyn and (not self.dash) \
+            and (time_pianoroll > self.wait_for_dyn_time + 4 * self.division_pianoroll): # 4 quarter notes
+            if self.cresc_nowedge:
+                self.direction_stop = time_pianoroll
+                self.cresc_nowedge = False
+            
+            starting_dyn = self.cresc_start_dyn 
+            if self.cresc > 0:
+                ending_dyn = min(starting_dyn + 0.25, 1)
+                self.dyn_flag[self.direction_start] = 'Cresc_start'
+                self.dyn_flag[self.direction_stop] = 'Cresc_stop'
+            else:
+                ending_dyn = max(starting_dyn - 0.25, 0)
+                self.dyn_flag[self.direction_start] = 'Dim_start'
+                self.dyn_flag[self.direction_stop] = 'Dim_stop'
+            
+            # print(self.direction_start, self.direction_stop, self.measure_number)
+            self.dynamics[self.direction_start:self.direction_stop] = \
+                    np.linspace(starting_dyn, ending_dyn, self.direction_stop - self.direction_start)
+            # print(starting_dyn, ending_dyn, ending_dyn, self.direction_start, self.direction_stop, "passed 4 notes")
+            self.dynamics[self.direction_stop:] = ending_dyn
+            self.direction_start = None
+            self.direction_stop = None
+            self.cresc = 0
+            self.wait_for_dyn = False
 
         # Directions
         # Cresc end dim are written with an arbitrary slope, then adjusted after the file
         # has been parsed by a smoothing function
         if tag == u'wedge':
             if attributes[u'type'] in (u'diminuendo', u'crescendo'):
+                if self.cresc:
+                    self.direction_stop = time_pianoroll
+                    if self.cresc_nowedge:
+                        self.cresc_nowedge = False
+                    starting_dyn = self.cresc_start_dyn 
+                    ending_dyn = self.dynamics[time_pianoroll]
+                    temp_ending_dyn = ending_dyn.copy()
+                    if self.cresc > 0:
+                        if ending_dyn <= starting_dyn:
+                            temp_ending_dyn = min(starting_dyn + 0.25, 1)
+                        self.dyn_flag[self.direction_start] = 'Cresc_start'
+                        self.dyn_flag[self.direction_stop] = 'Cresc_stop'
+                    if self.cresc < 0:
+                        if ending_dyn >= starting_dyn:
+                            temp_ending_dyn = max(starting_dyn - 0.25, 0)
+                        self.dyn_flag[self.direction_start] = 'Dim_start'
+                        self.dyn_flag[self.direction_stop] = 'Dim_stop'
+                    self.dynamics[self.direction_start:self.direction_stop] = \
+                        np.linspace(starting_dyn, temp_ending_dyn, self.direction_stop - self.direction_start)
+                    if self.cresc < 0 and attributes[u'type'] == u'crescendo':
+                        self.dynamics[self.direction_stop:] = temp_ending_dyn
+                    if self.cresc > 0 and attributes[u'type'] == u'diminuendo':
+                        self.dynamics[self.direction_stop:] = temp_ending_dyn
+                    self.direction_start = None
+                    self.direction_stop = None
+                    self.cresc = 0
+                    self.wait_for_dyn = False
+
                 self.direction_start = time_pianoroll
                 self.direction_type = attributes[u'type']
+                if attributes[u'type'] == u'diminuendo':
+                    self.cresc = -1
+                else:
+                    self.cresc = 1
             elif attributes[u'type'] == u'stop':
                 self.direction_stop = time_pianoroll
+                if self.duration_set:
+                    self.direction_stop += self.duration * self.division_pianoroll / self.division_score
                 if self.direction_start is None:
-                    raise NameError('Stop flag for a direction, but no direction has been started')
-                starting_dyn = self.dynamics[self.direction_start]
-                if self.direction_type == u'crescendo':
-                    ending_dyn = min(starting_dyn + 0.1, 1)
-                    self.dynamics[self.direction_start:self.direction_stop] = \
-                        np.linspace(starting_dyn, ending_dyn, self.direction_stop - self.direction_start)
-                    self.dyn_flag[self.direction_start] = 'Cresc_start'
-                    self.dyn_flag[self.direction_stop] = 'Cresc_stop'
-                elif self.direction_type == u'diminuendo':
-                    ending_dyn = max(starting_dyn - 0.1, 0)
-                    self.dynamics[self.direction_start:self.direction_stop] = \
-                        np.linspace(starting_dyn, ending_dyn, self.direction_stop - self.direction_start)
-                    self.dyn_flag[self.direction_start] = 'Dim_start'
-                    self.dyn_flag[self.direction_stop] = 'Dim_stop'
-                # Fill the end of the score with the ending value
-                self.dynamics[self.direction_stop:] = ending_dyn
-                self.direction_start = None
-                self.direction_stop = None
+                    pass
+                    # raise NameError('Stop flag for a direction, but no direction has been started')
+                else:
+                    starting_dyn = self.dynamics[self.direction_start]
+                    self.cresc_start_dyn  = starting_dyn
+                    self.wait_for_dyn = True
+                    self.wait_for_dyn_time = self.direction_stop
 
         ###################################################################
         ###################################################################
         ###################################################################
+
     def endElement(self, tag):
         if tag == u'pitch':
             if self.octave_set and self.step_set:
@@ -229,15 +406,20 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                 # Start and end time for the note
                 start_time = int(self.time * self.division_pianoroll / self.division_score)
                 if self.grace:
-                    end_time = start_time
-                    # A grace note is an anticipation
-                    start_time -= 1
+                    if self.slash:
+                        end_time = start_time
+                        # A grace note is an anticipation
+                        start_time -= 1
+                    else:
+                        end_time = start_time
+                        # A grace note is an anticipation
+                        start_time -= 1
                 else:
                     end_time = int((self.time + self.duration) * self.division_pianoroll / self.division_score)
                 # Its pitch
                 midi_pitch = mapping_step_midi[self.step] + self.octave * 12 + self.alter
                 # Write it in the pianoroll
-                self.pianoroll_local[start_time:end_time, midi_pitch] = int(1)
+                # self.pianoroll_local[start_time:end_time, midi_pitch] = int(1)
 
                 voice = u'1'
                 if self.voice_set:
@@ -247,6 +429,9 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                 if voice not in self.tying:
                     self.tying[voice] = False
 
+                if voice not in self.sluring:
+                    self.sluring[voice] = False
+
                 # Note that tying[voice] can't be set when opening the tie tag since
                 # the current voice is not knew at this time
                 if self.tie_type == u"start":
@@ -255,19 +440,136 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                 if self.tie_type == u"stop":
                     self.tying[voice] = False
 
+
+                if self.stop_slur:
+                    self.slur_note = None
+                    self.stop_slur = False
+
+                if self.slur_type == u"start":
+                    # Allows to keep on the tying if it spans over several notes
+                    self.sluring[voice] = True
+                    if self.slur_note == None:
+                        self.slur_note = midi_pitch
+                if self.slur_type == u"stop":
+                    self.sluring[voice] = False
+                    # self.stop_slur = True
+                
+
                 tie = self.tying[voice]
+                slur = self.sluring[voice]
+
+                if (not tie) and (not slur):
+                    self.stop_slur = True
+                    # self.slur_note = None
 
                 # Staccati
                 if self.chord:
                     self.staccato = self.previous_staccato
+                    self.staccatissimo = self.previous_staccatissimo
                 staccato = self.staccato
+                staccatissimo = self.staccatissimo
 
-                if (not tie) and (not staccato):
-                    self.articulation_local[start_time:end_time - 1, midi_pitch] = int(1)
-                if tie:
-                    self.articulation_local[start_time:end_time, midi_pitch] = int(1)
-                if staccato:
-                    self.articulation_local[start_time:start_time + 1, midi_pitch] = int(1)
+
+                # if self.measure_number == "39":
+                #     print(start_time, self.step)
+
+                
+                ########################################################################################################
+                # articulation
+                if self.tremolo and self.time_mod and self.tremolo_end:
+                    if self.actual_notes / self.normal_notes == 2.:
+                        pass
+                    else:
+                        self.tremolo_length = self.tremolo_length * self.normal_notes / self.actual_notes 
+                        self.time_mod = False
+                        self.normal_notes = 0
+                        self.actual_notes = 0
+
+                if self.tremolo and (not self.tremolo_double):
+                    if self.tremolo_end:
+                        art_end_time = end_time - 1
+                        intervals = np.arange(self.tremolo_start_time, art_end_time, self.tremolo_length, dtype=int)
+                        for i in range(0, len(intervals)):
+                            s = intervals[i]
+                            e = intervals[i+1] if i < len(intervals)-1 else s + int(self.tremolo_length)
+                            self.articulation_local[s:e-1, midi_pitch] = int(1)
+
+                elif (not tie) and (not self.slur_note) and (not staccato) and (not staccatissimo):
+                    art_end_time = end_time - 1
+                    self.articulation_local[start_time:art_end_time, midi_pitch] = int(1)
+                elif self.slur_note and (not tie) and (not slur):
+                    art_end_time = end_time - 1
+                    self.articulation_local[start_time:art_end_time, self.slur_note] = int(1)
+                elif self.slur_note:
+                    art_end_time = end_time
+                    self.articulation_local[start_time:art_end_time, self.slur_note] = int(1)
+                elif staccato:
+                    art_end_time = start_time + (end_time-start_time) // 2
+                    self.articulation_local[start_time:art_end_time, midi_pitch] = int(1)
+                elif staccatissimo:
+                    art_end_time = start_time + (end_time-start_time) // 4
+                    self.articulation_local[start_time:art_end_time, midi_pitch] = int(1)
+                elif tie:
+                    art_end_time = end_time
+                    self.articulation_local[start_time:art_end_time, midi_pitch] = int(1)
+                
+                ########################################################################################################
+                # pianoroll  
+                      
+                if self.trill:
+                    delay_start = int(np.random.random()*self.trill_length*0.7) if np.random.random()<=0.5 else 0
+                    intervals = np.arange(start_time+delay_start, art_end_time, self.trill_length, dtype=int)[1:]
+                    e = start_time
+                    for i in range(0, len(intervals)-1, 2):
+                        s = intervals[i-1] if i > 0 else start_time
+                        m = intervals[i]
+                        e = intervals[i+1]
+                        self.pianoroll_local[s:m, midi_pitch] = int(1)
+                        self.pianoroll_local[m:e, self.trill_next_step] = int(1)
+                    self.pianoroll_local[e:art_end_time,midi_pitch] = int(1)
+
+                elif self.tremolo:
+                    if self.tremolo_end:
+                        if self.tremolo_double:
+                            intervals = np.arange(self.tremolo_start_time, art_end_time, self.tremolo_length, dtype=int)[1:]
+                            e = self.tremolo_start_time
+                            for i in range(0, len(intervals), 2):
+                                s = intervals[i-1] if i > 0 else self.tremolo_start_time
+                                m = intervals[i]
+                                e = intervals[i+1] if i < len(intervals)-1 else 2*m-s
+                                if e > art_end_time:
+                                    e = art_end_time
+                                self.pianoroll_local[s:m, self.tremolo_start_pitch] = int(1)
+                                self.pianoroll_local[m:e, midi_pitch] = int(1)
+                            self.pianoroll_local[e:art_end_time,midi_pitch] = int(1)
+                            self.tremolo_start_time
+                            self.tremolo_length
+                        else:
+                            intervals = np.arange(self.tremolo_start_time, art_end_time, self.tremolo_length, dtype=int)
+                            for i in range(0, len(intervals)):
+                                s = intervals[i]
+                                e = intervals[i+1] if i < len(intervals)-1 else s + int(self.tremolo_length)
+                                self.pianoroll_local[s:e-1, midi_pitch] = int(1)
+                        self.tremolo = False
+                        self.tremolo_double = False
+                        self.tremolo_length = 0
+                        self.tremolo_start_pitch = 0
+                        self.tremolo_start_time = 0
+                        self.tremolo_end = False
+                        
+                elif (not tie) and (not slur) and (not staccato) and (not staccatissimo):
+                    self.pianoroll_local[start_time:end_time - 1, midi_pitch] = int(1)
+                elif staccato:
+                    stop_time = start_time + (end_time-start_time) // 2
+                    self.pianoroll_local[start_time:stop_time, midi_pitch] = int(1)
+                elif staccatissimo:
+                    stop_time = start_time + (end_time-start_time) // 4
+                    self.pianoroll_local[start_time:stop_time, midi_pitch] = int(1)
+                elif tie:
+                    self.pianoroll_local[start_time:end_time, midi_pitch] = int(1)
+                elif slur:
+                    self.pianoroll_local[start_time:end_time, midi_pitch] = int(1)
+            
 
             # Increment the time counter
             if not self.grace and note_played:
@@ -282,7 +584,18 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
             self.tie_type = None
             self.previous_staccato = self.staccato
             self.staccato = False
+            self.previous_staccatissimo = self.staccatissimo
+            self.staccatissimo = False
             self.chord = False
+            self.trill = False
+            self.trill_new_step = 0
+            self.trill_new_octave = 0
+            self.trill_new_alter = 0
+            self.trill_next_step = 0
+            self.trill_length = 0
+            self.time_mod = False
+            self.actual_notes = 0
+            self.normal_notes = 0
 
         if tag == u'backup':
             if not self.duration_set:
@@ -306,7 +619,8 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
             instru = self.part_instru_mapping[self.identifier]
             # Smooth the dynamics
             horizon = 4  # in number of quarter notes
-            dynamics = smooth_dyn(self.dynamics, self.dyn_flag, self.division_pianoroll, horizon)
+            # dynamics = smooth_dyn(self.dynamics, self.dyn_flag, self.division_pianoroll, horizon)
+            dynamics = self.dynamics
             # Apply them on the pianoroll and articulation
             if instru in self.pianoroll.keys():
                 self.pianoroll[instru] = np.maximum(self.pianoroll[instru], np.transpose(np.multiply(np.transpose(self.pianoroll_local), dynamics)))
@@ -317,11 +631,16 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         return
         
     def characters(self, content):
+        # print(self.CurrentElement, self.CurrentElement == u"dashes")
+        # print(content)
         # Avoid breaklines and whitespaces
         if content.strip():
+            if self.CurrentElement == u"fifths":
+                self.keysign = int(content)
             # Time and measure informations
             if self.CurrentElement == u"divisions":
                 self.division_score = int(content)
+                # print(self.division_score)
                 if (not self.beat == -1) and (not self.beat_type == -1):
                     self.bar_length = int(self.division_score * self.beat * 4 / self.beat_type)
             if self.CurrentElement == u"beats":
@@ -358,22 +677,80 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
 
             if self.CurrentElement == u"part-name":
                 self.content += content
+            
+            # for trill mark
+            if self.CurrentElement == u'accidental-mark':
+                if self.trill:
+                    accidental_map = {'natural':0, 'sharp':1, 'double-sharp':2, 'flat':-1, 'flat-flat':-2}
+                    self.trill_new_alter = accidental_map[self.content]
+                    self.trill_next_step = mapping_step_midi[self.trill_new_step] + self.trill_new_octave * 12 + self.trill_new_alter
+
+            # tremolo
+            if self.CurrentElement == u'tremolo':
+                self.tremolo = True
+                type = self.CurrentAttributes[u'type']
+                if type == 'single':
+                    self.tremolo_double = False
+                    self.tremolo_end = True
+                    self.tremolo_start_time = int(self.time * self.division_pianoroll / self.division_score)
+                elif type == 'start':
+                    self.tremolo_double = True
+                    self.tremolo_start_pitch =  mapping_step_midi[self.step] + self.octave * 12 + self.alter
+                    self.tremolo_start_time = int(self.time * self.division_pianoroll / self.division_score)
+                elif type == 'stop':
+                    self.tremolo_end = True
+                    
+                self.tremolo_length = self.division_pianoroll / (2**int(content))
+            
+            if self.time_mod:
+                if self.CurrentElement == u'actual-notes':
+                    self.actual_notes = int(content)
+                if self.CurrentElement == u'normal-notes':
+                    self.normal_notes = int(content)
 
             ############################################################
             # Directions
             if self.CurrentElement == u'words':
                 # We consider that a written dim or cresc approximately span over 4 quarter notes.
                 # If its less its gonna be overwritten by the next dynamic
-                is_cresc = re.match(u'$[cC]res.*', content)
-                is_dim = re.match(u'$[dD]im.*', content)
-                if is_dim or is_cresc:
+                is_cresc = re.match(r'[cC]res.*', content)
+                is_decr = re.match(r'[dD]ecres.*', content)
+                is_dim = re.match(r'[dD]im.*', content)
+                
+                if is_dim or is_cresc or is_decr:
                     t_start = int(self.time * self.division_pianoroll / self.division_score)
                     t_end = t_start + 4 * self.division_pianoroll
                     start_dyn = self.dynamics[t_start]
+                    # if is_cresc:
+                    #     self.dynamics[t_start:t_end] = np.linspace(start_dyn, min(start_dyn + 0.25, 1), t_end - t_start)
+                    # elif is_dim or is_decr:
+                    #     self.dynamics[t_start:t_end] = np.linspace(start_dyn, max(start_dyn - 0.25, 0), t_end - t_start)
                     if is_cresc:
-                        self.dynamics[t_start:t_end] = np.linspace(start_dyn, max(start_dyn + 0.1, 1), t_end - t_start)
-                    if is_dim:
-                        self.dynamics[t_start:t_end] = np.linspace(start_dyn, min(start_dyn - 0.1, 0), t_end - t_start)
+                        self.cresc = 1
+                        self.cresc_start_dyn = start_dyn
+                        self.direction_start = t_start
+                        self.wait_for_dyn = True
+                        self.wait_for_dyn_time = t_start
+                        self.cresc_nowedge = True
+                    elif is_dim or is_decr:
+                        self.cresc = -1
+                        self.cresc_start_dyn = start_dyn
+                        self.direction_start = t_start
+                        self.wait_for_dyn = True
+                        self.wait_for_dyn_time = t_start
+                        self.cresc_nowedge = True
+
+        elif self.CurrentElement == u"dashes" and self.cresc and self.cresc_nowedge:
+            if self.dash_time != self.time:
+                self.dash_time = self.time
+                if self.CurrentAttributes[u'type'] == "start":
+                    self.dash = True
+                elif self.CurrentAttributes[u'type'] == "stop":
+                    self.dash = False
+                    t_start = int(self.time * self.division_pianoroll / self.division_score)
+                    self.direction_stop = t_start
+                    self.wait_for_dyn_time = t_start
+                    self.cresc_nowedge = False
         return
         
 
@@ -404,7 +781,7 @@ def pre_process_file(file_path):
     return temp_file_path
 
     
-def scoreToPianoroll(score_path, quantization):
+def scoreToPianoroll(score_path, quantization, shortest_notes):
     # Remove DOCTYPE
     tmp_file_path = pre_process_file(score_path)
 
@@ -421,7 +798,7 @@ def scoreToPianoroll(score_path, quantization):
     # Now parse the file and get the pianoroll, articulation and dynamics
     parser = xml.sax.make_parser()
     parser.setFeature(xml.sax.handler.feature_namespaces, 0)
-    Handler_score = ScoreToPianorollHandler(quantization, total_length)
+    Handler_score = ScoreToPianorollHandler(quantization, total_length, shortest_notes)
     parser.setContentHandler(Handler_score)
     parser.parse(tmp_file_path)
 
@@ -434,7 +811,7 @@ def scoreToPianoroll(score_path, quantization):
         articulation[instru_name] = mat
     
     os.remove(tmp_file_path)
-    return pianoroll, articulation
+    return pianoroll, articulation, Handler_score
 
 if __name__ == '__main__':
     score_path = "/Users/leo/Recherche/GitHub_Aciditeam/database/Arrangement/SOD/OpenMusicScores/0/Belle qui tiens ma vie   - Arbeau, Toinot .xml"
