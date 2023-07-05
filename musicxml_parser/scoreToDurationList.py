@@ -19,6 +19,7 @@ mapping_step_midi = {
 }
 
 
+
 class ScoreToPianorollHandler(xml.sax.ContentHandler):
     def __init__(self, division, total_length, number_pitches=128, discard_grace=False):
         self.CurrentElement = u""
@@ -29,7 +30,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         # and instrument name in the produced pianoroll
         self.content = u""
         self.part_instru_mapping = {}
-        self.current_tempo = None
+        self.current_tempo = 0
 
         # Measure informations
         self.time = 0              # time counter
@@ -93,7 +94,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         self.tempo_mark_ = False
         self.tempo_mark = True
         # collect durations
-        self.duration_list = {}
+        self.duration_list = {0:[]}
 
         ####################################################################
         ####################################################################
@@ -126,7 +127,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
 
         if tag == u'measure':
             self.measure_number = attributes[u'number']
-            if self.measure_number == "1":
+            if self.measure_number in ("0","1"):
                 self.tempo_mark_ = True
             elif (u'implicit' in attributes) and (attributes[u'implicit'] == "yes"):
                 self.tempo_mark = True

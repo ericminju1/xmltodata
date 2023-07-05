@@ -15,6 +15,7 @@
 #           This dictionary is imported through the json format.
 #
 
+import numpy as np
 import xml.sax
 import re
 import os
@@ -254,19 +255,43 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
             self.dynamics[time_pianoroll:] = mapping_dyn_number[tag]
             self.dyn_flag[time_pianoroll] = 'N'
             dyn = True
-        elif tag in (u"sf", u"sfz", u"sffz", u"fz"):
-            self.dynamics[time_pianoroll] = mapping_dyn_number[u'fff']
+        elif tag in (u"sf", u"sfz", u"fz"):
+            keys = np.array(list(self.shortest_notes.keys()))
+            tempo_key = max(sorted(keys[keys<=time_pianoroll]))
+            length = int(self.shortest_notes[tempo_key])
+            cur_dyn = self.dynamics[time_pianoroll]
+            self.dynamics[time_pianoroll:time_pianoroll+length] = mapping_dyn_number[u'f']
+            self.dynamics[time_pianoroll+length:time_pianoroll+2*length] = \
+                np.linspace(mapping_dyn_number[u'f'], cur_dyn, length)
+            self.dyn_flag[time_pianoroll] = 'N'
+            dyn = True
+        elif tag in (u"sffz"):
+            keys = np.array(list(self.shortest_notes.keys()))
+            tempo_key = max(sorted(keys[keys<=time_pianoroll]))
+            length = int(self.shortest_notes[tempo_key])
+            cur_dyn = self.dynamics[time_pianoroll]
+            self.dynamics[time_pianoroll:time_pianoroll+length] = mapping_dyn_number[u'ff']
+            self.dynamics[time_pianoroll+length:time_pianoroll+2*length] = \
+                np.linspace(mapping_dyn_number[u'ff'], cur_dyn, length)
             self.dyn_flag[time_pianoroll] = 'N'
             dyn = True
         elif tag == u'fp':
-            self.dynamics[time_pianoroll] = mapping_dyn_number[u'f']
-            self.dynamics[time_pianoroll + 1:] = mapping_dyn_number[u'p']
+            keys = np.array(list(self.shortest_notes.keys()))
+            tempo_key = max(sorted(keys[keys<=time_pianoroll]))
+            length = int(self.shortest_notes[tempo_key])
+            self.dynamics[time_pianoroll:time_pianoroll+length] = mapping_dyn_number[u'f']
+            self.dynamics[time_pianoroll+length:time_pianoroll+2*length] = \
+                np.linspace(mapping_dyn_number[u'f'], mapping_dyn_number[u'p'], length)
             self.dyn_flag[time_pianoroll] = 'N'
             self.dyn_flag[time_pianoroll + 1] = 'N'
             dyn = True
         elif tag == u'ffp':
-            self.dynamics[time_pianoroll] = mapping_dyn_number[u'ff']
-            self.dynamics[time_pianoroll + 1:] = mapping_dyn_number[u'p']
+            keys = np.array(list(self.shortest_notes.keys()))
+            tempo_key = max(sorted(keys[keys<=time_pianoroll]))
+            length = int(self.shortest_notes[tempo_key])
+            self.dynamics[time_pianoroll:time_pianoroll+length] = mapping_dyn_number[u'ff']
+            self.dynamics[time_pianoroll+length:time_pianoroll+2*length] = \
+                np.linspace(mapping_dyn_number[u'ff'], mapping_dyn_number[u'p'], length)
             self.dyn_flag[time_pianoroll] = 'N'
             self.dyn_flag[time_pianoroll + 1] = 'N'
             dyn = True
@@ -407,13 +432,21 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                 start_time = int(self.time * self.division_pianoroll / self.division_score)
                 if self.grace:
                     if self.slash:
+                        keys = np.array(list(self.shortest_notes.keys()))
+                        tempo_key = max(sorted(keys[keys<=start_time]))
+                        length = int(self.shortest_notes[tempo_key] // 2)
                         end_time = start_time
                         # A grace note is an anticipation
-                        start_time -= 1
+                        start_time -= length
+                        self.pianoroll_local[start_time:end_time, :] = int(0)
                     else:
+                        keys = np.array(list(self.shortest_notes.keys()))
+                        tempo_key = max(sorted(keys[keys<=start_time]))
+                        length = int(self.shortest_notes[tempo_key] // 2)
                         end_time = start_time
                         # A grace note is an anticipation
-                        start_time -= 1
+                        start_time -= length
+                        self.pianoroll_local[start_time:end_time, :] = int(0)
                 else:
                     end_time = int((self.time + self.duration) * self.division_pianoroll / self.division_score)
                 # Its pitch
