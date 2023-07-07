@@ -1,13 +1,23 @@
 from xmlToData import xmlToData
 from reverse_pianoroll import piano_roll_to_pretty_midi
 
-def xmlToMidi(xml_path, quantization=96, program=40, save_path=None):
-    roll, art, dyn = xmlToData(xml_path, quantization)
-    mid = piano_roll_to_pretty_midi(roll.T, dynamic=dyn, fs=quantization, program=program)
-    mid2 = piano_roll_to_pretty_midi(art.T, fs=quantization, program=program)
+def xmlToMidi(xml_paths, quantization=96, programs=[40,40,41,42], save_path=None):
+    rolls = []
+    arts = []
+    dyns = []
+
+    for xml_path in xml_paths:
+        print('---')
+        roll, art, dyn = xmlToData(xml_path, quantization)
+        rolls.append(roll.T)
+        arts.append(art.T)
+        dyns.append(dyn)
+
+    mid = piano_roll_to_pretty_midi(rolls, dynamics=dyns, fs=quantization, programs=programs)
+    mid2 = piano_roll_to_pretty_midi(arts, fs=quantization, programs=programs)
 
     if save_path is None:
-        save_path = ".".join(xml_path.split('.')[:-1])
+        save_path = ".".join(xml_paths[0].split('.')[:-1])
         
     mid.write("{}_roll.mid".format(save_path))
     mid2.write("{}_art.mid".format(save_path))

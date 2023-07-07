@@ -438,7 +438,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                         end_time = start_time
                         # A grace note is an anticipation
                         start_time -= length
-                        self.pianoroll_local[start_time:end_time, :] = int(0)
+                        self.pianoroll_local[start_time-1:end_time, :] = int(0)
                     else:
                         keys = np.array(list(self.shortest_notes.keys()))
                         tempo_key = max(sorted(keys[keys<=start_time]))
@@ -446,7 +446,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                         end_time = start_time
                         # A grace note is an anticipation
                         start_time -= length
-                        self.pianoroll_local[start_time:end_time, :] = int(0)
+                        self.pianoroll_local[start_time-1:end_time, :] = int(0)
                 else:
                     end_time = int((self.time + self.duration) * self.division_pianoroll / self.division_score)
                 # Its pitch
