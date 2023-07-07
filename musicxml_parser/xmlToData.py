@@ -1,5 +1,5 @@
-from scoreToPianoroll_durations import scoreToPianorolld
-from scoreToPianoroll_test import scoreToPianoroll
+from scoreToDurationList import scoreToPianorolld
+from scoreToPianoroll import scoreToPianoroll
 import numpy as np
 
 def xmlToData(score_path, quantization=96):

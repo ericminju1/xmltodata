@@ -439,6 +439,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                         # A grace note is an anticipation
                         start_time -= length
                         self.pianoroll_local[start_time-1:end_time, :] = int(0)
+                        self.articulation_local[start_time-1:end_time, :] = int(0)
                     else:
                         keys = np.array(list(self.shortest_notes.keys()))
                         tempo_key = max(sorted(keys[keys<=start_time]))
@@ -447,6 +448,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                         # A grace note is an anticipation
                         start_time -= length
                         self.pianoroll_local[start_time-1:end_time, :] = int(0)
+                        self.articulation_local[start_time-1:end_time, :] = int(0)
                 else:
                     end_time = int((self.time + self.duration) * self.division_pianoroll / self.division_score)
                 # Its pitch
@@ -503,8 +505,9 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                 staccatissimo = self.staccatissimo
 
 
-                # if self.measure_number == "39":
+                # if self.measure_number == "8":
                 #     print(start_time, self.step)
+                #     print(slur, tie, self.slur_note, staccato, staccatissimo)
 
                 
                 ########################################################################################################
@@ -527,13 +530,13 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                             e = intervals[i+1] if i < len(intervals)-1 else s + int(self.tremolo_length)
                             self.articulation_local[s:e-1, midi_pitch] = int(1)
 
-                elif (not tie) and (not self.slur_note) and (not staccato) and (not staccatissimo):
+                elif (not tie) and (self.slur_note is None) and (not staccato) and (not staccatissimo):
                     art_end_time = end_time - 1
                     self.articulation_local[start_time:art_end_time, midi_pitch] = int(1)
-                elif self.slur_note and (not tie) and (not slur):
+                elif (self.slur_note is not None) and (not tie) and (not slur):
                     art_end_time = end_time - 1
                     self.articulation_local[start_time:art_end_time, self.slur_note] = int(1)
-                elif self.slur_note:
+                elif (self.slur_note is not None):
                     art_end_time = end_time
                     self.articulation_local[start_time:art_end_time, self.slur_note] = int(1)
                 elif staccato:
@@ -656,11 +659,11 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
             dynamics = self.dynamics
             # Apply them on the pianoroll and articulation
             if instru in self.pianoroll.keys():
-                self.pianoroll[instru] = np.maximum(self.pianoroll[instru], np.transpose(np.multiply(np.transpose(self.pianoroll_local), dynamics)))
-                self.articulation[instru] = np.maximum(self.articulation[instru], np.transpose(np.multiply(np.transpose(self.articulation_local), dynamics)))
+                self.pianoroll[instru] = np.maximum(self.pianoroll[instru], np.transpose(np.multiply(np.transpose(self.pianoroll_local), 1)))
+                self.articulation[instru] = np.maximum(self.articulation[instru], np.transpose(np.multiply(np.transpose(self.articulation_local), 1)))
             else:
-                self.pianoroll[instru] = np.transpose(np.multiply(np.transpose(self.pianoroll_local), dynamics))
-                self.articulation[instru] = np.transpose(np.multiply(np.transpose(self.articulation_local), dynamics))
+                self.pianoroll[instru] = np.transpose(np.multiply(np.transpose(self.pianoroll_local), 1))
+                self.articulation[instru] = np.transpose(np.multiply(np.transpose(self.articulation_local), 1))
         return
         
     def characters(self, content):

@@ -1,5 +1,6 @@
 import pretty_midi
 import copy
+import mido
 
 def length(midi_path):
     mid = pretty_midi.PrettyMIDI(midi_path)
