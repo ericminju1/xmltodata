@@ -1,8 +1,7 @@
 # MusicXML parser
 
-## Installation
-
-    pip install musicxml_parser
+forked from https://github.com/qsdfo/musicxml_parser  
+and added some more articulations
 
 ## Usage
 
