@@ -5,24 +5,26 @@ and added some more articulations
 
 ## Usage
 
-    from musicxml_parser.scoreToPianoroll import scoreToPianoroll
-    score_path = "test.xml"
-    quantization = 16
-    pianoroll, articulation = scoreToPianoroll(score_path, quantization)
+    from xmlToMidi import xmlToMidi
+    
+    paths = ["Vn1_path.musicxml",
+             "Vn1_path.musicxml",
+             "Va_path.musicxml",
+             "Vc_path.musicxml"]
+    xmlToMidi(paths, save_path="path/to/file/without/.mid")
 
-## Description :
-Music XML parser written in Python based on a SAX analyzer.
-Given a mxml file, outputs two dictionaries indexed by instruments names:
-- a pianoroll
-- a binary articulation which is the same matrix as the pianoroll but with shorter duration so that we can distinguish between a long note or several repeated occurences of the same note. Hence, if a quarter note lasted 4 frames in the pianoroll it would be 3 in the articulation. Staccati notes are 1 whatever their duration.
+manually add tempo mark for splitting 
 
-## Packages dependencies :
-* numpy
+    from splitMidiData import splitMidiData
+    
+    splitMidiData("path/to/file/after/tempo")
 
-## Files
-The main function is ScoreToPianoroll in ScoreToPianoroll.py
-It takes as input the path to a MusicXML file and output two python dictionnary of the form :
+&nbsp;
 
-    {'track_name' : matrix}
+    from generate_dataset import generate_dataset
 
-where matrix is two-dimensional, first axis begin the time, second the pitch.
+    path_format = "folder/after/split/{:02d}_{:01d}_{}.mid"
+    save_format = "path/to/audio/{:02d}/{:01d}.mid"
+
+    splits = 16  ## number of tempo changes
+    generate_dataset(path_format, save_format, splits=splits)
