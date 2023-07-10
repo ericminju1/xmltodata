@@ -5,8 +5,8 @@ import xml.sax
 import re
 import os
 import tempfile
-from smooth_dynamic import smooth_dyn
-from totalLengthHandler import TotalLengthHandler
+from .smooth_dynamic import smooth_dyn
+from .totalLengthHandler import TotalLengthHandler
 
 mapping_step_midi = {
     'C': 0,

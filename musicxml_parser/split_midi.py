@@ -44,6 +44,8 @@ def split_midi(base, split_num, start_time, end_time, export=True):
             del notes[index] 
             
     if export:
-        mid2.write("{}/{:02d}.mid".format(base[:-4], split_num))
+        save_path = "{}/{:02d}.mid".format(base[:-4], split_num)
+        mid2.write(save_path)
+        return mid2, save_path
     
     return mid2

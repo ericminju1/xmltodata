@@ -21,8 +21,8 @@ import re
 import os
 import tempfile
 import numpy as np
-from smooth_dynamic import smooth_dyn
-from totalLengthHandler import TotalLengthHandler
+from .smooth_dynamic import smooth_dyn
+from .totalLengthHandler import TotalLengthHandler
 
 mapping_step_midi = {
     'C': 0,

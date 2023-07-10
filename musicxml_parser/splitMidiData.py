@@ -1,5 +1,6 @@
-from split_midi import split_midi
+from .split_midi import split_midi
 import pretty_midi
+import mido
 import os
 
 def splitMidiData(path):
@@ -13,13 +14,15 @@ def splitMidiData(path):
     
     times = list(times) + [end_time]
     for i in range(len(times)-1):
-        mid_split = split_midi(path, i, times[i], times[i+1], export=False)
-        pm = pretty_midi.PrettyMIDI()
-        pm2 = pretty_midi.PrettyMIDI()
+        mid_split, save_path = split_midi(path, i, times[i], times[i+1], export=True)
+        midi_data = mido.MidiFile(filename=save_path) 
+
         for n, inst in enumerate(mid_split.instruments):
+            pm = pretty_midi.PrettyMIDI()
+            pm._load_tempo_changes(midi_data)
+            pm.instruments.append(inst)
+            
             if n%2 == 0:
-                pm.instruments.append(inst)
+                pm.write("{}/{:02d}_{:01d}_roll.mid".format(path[:-4], i, n//2))
             else:
-                pm2.instruments.append(inst)
-        pm.write("{}/{:02d}_roll.mid".format(path[:-4], i))
-        pm2.write("{}/{:02d}_art.mid".format(path[:-4], i))
+                pm.write("{}/{:02d}_{:01d}_art.mid".format(path[:-4], i, n//2))
