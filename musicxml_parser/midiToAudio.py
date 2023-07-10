@@ -4,6 +4,7 @@ from midi_ddsp.utils.inference_utils import get_process_group
 import numpy as np
 import soundfile as sf
 import pretty_midi
+import os
 
 synthesis_generator, expression_generator = load_pretrained_model()
 
@@ -85,5 +86,9 @@ def midiToAudio(roll_path, art_path, interpolation_rate=0.99, save_path=None):
 
     if save_path is None:
         save_path = "{}.wav".format(roll_path[:-9])
+
+    directory = "/".join(save_path.split('/')[:-1])
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
     sf.write(save_path, final_audio[0], samplerate=16000)
