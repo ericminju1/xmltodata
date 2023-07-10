@@ -3,6 +3,7 @@ from midi_ddsp.utils.midi_synthesis_utils import synthesize_mono_midi
 from midi_ddsp.utils.inference_utils import get_process_group
 import numpy as np
 import soundfile as sf
+import pretty_midi
 
 synthesis_generator, expression_generator = load_pretrained_model()
 
@@ -37,6 +38,38 @@ def midiToAudio(roll_path, art_path, interpolation_rate=0.99, save_path=None):
     inter_noise = (1-interpolation_rate)*np.power(10,noise_ori[:,:new_length,:]) + \
                    interpolation_rate*np.power(10,noise_new[:,:new_length,:])
     noise_changed = np.log10(inter_noise)
+
+    ## Dynamic
+    mid0 = pretty_midi.PrettyMIDI(roll_path)
+    expression_dict = {0:80}
+    for cc in mid0.instruments[0].control_changes:
+        if cc.number == 11:
+            val = cc.value
+            expression_dict[cc.time*250] = val
+    expression_dict[1e16] = val
+
+    expression_times = sorted(list(expression_dict.keys()))+[1e16]
+    cursor = 0
+    expression_list = []
+    for i in range(new_length):
+        while (i >= expression_times[cursor+1]):
+            cursor += 1
+        k0 = expression_times[cursor]
+        v0 = expression_dict[k0]
+        k1 = expression_times[cursor+1]
+        v1 = expression_dict[k1]
+        if np.abs(v0-v1) <= 2:
+            w0 = (k1-i) / (k1-k0)
+            w1 = (i-k0) / (k1-k0)
+            expression_list.append(w0*v0+w1*v1)
+        else:
+            expression_list.append(v0)
+
+    expression = np.array(expression_list)
+    expression = 3*np.log10(expression/128)
+
+    amps_changed = amps_changed + expression[np.newaxis,:,np.newaxis]
+    noise_changed = noise_changed + expression[np.newaxis,:,np.newaxis]
 
     processor_group = get_process_group(new_length, use_angular_cumsum=True)
     midi_audio_changed = processor_group({'amplitudes': amps_changed,
