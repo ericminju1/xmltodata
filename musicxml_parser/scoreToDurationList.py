@@ -155,7 +155,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
 
         ####################################################################
         if tag == u'direction':
-            if attributes[u'placement'] == 'above' and self.tempo_mark_:
+            if u'placement' in attributes.keys() and (attributes[u'placement'] == 'above') and self.tempo_mark_:
                 self.tempo_mark = True
         ####################################################################
 
