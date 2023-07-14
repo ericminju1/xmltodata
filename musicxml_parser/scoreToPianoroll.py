@@ -316,9 +316,12 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
                 self.dyn_flag[self.direction_start] = 'Dim_start'
                 self.dyn_flag[self.direction_stop] = 'Dim_stop'
 
-            self.dynamics[self.direction_start:self.direction_stop] = \
-                np.linspace(starting_dyn, temp_ending_dyn, self.direction_stop - self.direction_start)
-            # print(starting_dyn, temp_ending_dyn, ending_dyn, self.direction_start, self.direction_stop)
+            try:
+                self.dynamics[self.direction_start:self.direction_stop] = \
+                    np.linspace(starting_dyn, temp_ending_dyn, self.direction_stop - self.direction_start)
+            except Exception:
+                pass
+            # print(self.measure_number, starting_dyn, temp_ending_dyn, ending_dyn, self.direction_start, self.direction_stop)
             # self.dynamics[self.direction_stop:] = ending_dyn
             self.direction_start = None
             self.direction_stop = None

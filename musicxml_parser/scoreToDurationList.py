@@ -93,6 +93,7 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
         # Directions
         self.tempo_mark_ = False
         self.tempo_mark = True
+        self.tempo_mark_count = 0
         # collect durations
         self.duration_list = {0:[]}
 
@@ -129,13 +130,19 @@ class ScoreToPianorollHandler(xml.sax.ContentHandler):
             self.measure_number = attributes[u'number']
             if self.measure_number in ("0","1"):
                 self.tempo_mark_ = True
+                self.tempo_mark_count = 1
             elif (u'implicit' in attributes) and (attributes[u'implicit'] == "yes"):
-                self.tempo_mark = True
+                self.tempo_mark_ = True
+                self.tempo_mark_count = 1
             else:
-                self.tempo_mark_ = False
+                if self.tempo_mark_count <= 0:
+                    self.tempo_mark_ = False
+                else:
+                    self.tempo_mark_count -= 1
         
         if tag == u'barline':
             self.tempo_mark_ = True
+            self.tempo_mark_count = 1
         
         if tag == u'note':
             self.not_played_note = False
