@@ -45,10 +45,13 @@ def synthToAudio(synth_path, interpolation_rate=0.99, save_path=None):
     noise_changed = rev_exp_sigmoid(inter_noise)
 
     expression = data['expression']
-    log_expression = 2*np.log10(expression)
+    expression2 = expression**2
 
-    amps_changed = amps_changed + log_expression[np.newaxis,:,np.newaxis] + 2
-    noise_changed = noise_changed + log_expression[np.newaxis,:,np.newaxis] 
+    amps_changed = exp_sigmoid(amps_changed)*expression2[np.newaxis,:,np.newaxis]
+    noise_changed = exp_sigmoid(noise_changed)*expression2[np.newaxis,:,np.newaxis]
+
+    amps_changed = rev_exp_sigmoid(amps_changed)
+    noise_changed = rev_exp_sigmoid(noise_changed)
 
     processor_group = get_process_group(new_length, use_angular_cumsum=True)
     midi_audio_changed = processor_group({'amplitudes': amps_changed,
