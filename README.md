@@ -12,9 +12,12 @@ and added some more articulations
              "Va_path.musicxml",
              "Vc_path.musicxml"]
     xmlToMidi(paths, save_path="path/to/file/without/.mid")
-    
+
 &nbsp;
-manually add tempo mark for splitting 
+REQUIRED: manually add tempo mark for splitting (Use any DAW program)
+
+&nbsp;
+split midi based on manual tempor marks
 
     from splitMidiData import splitMidiData
     
