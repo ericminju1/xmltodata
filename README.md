@@ -20,11 +20,22 @@ manually add tempo mark for splitting
     splitMidiData("path/to/file/after/tempo")
 
 &nbsp;
+generate synthesis parameters before audio
 
-    from generate_dataset import generate_dataset
+    from generate_dataset import generate_synth
 
     path_format = "folder/after/split/{:02d}_{:01d}_{}.mid"
-    save_format = "path/to/audio/{:02d}/{:01d}.wav"
+    save_format = "path/to/audio/{:02d}/{:01d}.npz"
 
     splits = 16  ## number of tempo changes
-    generate_dataset(path_format, save_format, splits=splits)
+    generate_synth(path_format, save_format, splits=splits)
+
+&nbsp;
+generate audio from synth parameters
+
+    from generate_dataset import generate_audio_from_synth
+
+    path_format = "path/to/audio/{:02d}/{:01d}.npz"
+
+    splits = 16  ## number of tempo changes
+    generate_audio_from_synth(path_format, splits, interpolation_rate=0.99)
