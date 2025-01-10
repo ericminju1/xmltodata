@@ -1,9 +1,9 @@
-# MusicXML parser
+# Synthetic Dataset Generation for String Ensemble Separation
 
-forked from https://github.com/qsdfo/musicxml_parser  
+forked musicxml_parser from https://github.com/qsdfo/musicxml_parser  
 and added some more articulations
 
-## Usage
+## Data Creation from MusicXML
 
     from xmlToMidi import xmlToMidi
     
